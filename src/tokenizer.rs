@@ -47,3 +47,19 @@ impl<'a> TokenStream<'a> {
         self.advance();
     }
 }
+
+
+/// Possible states of the state machine.
+enum TokenizerState {
+    INIT,
+    WTHN,
+    TABS,
+    CMMT_INIT,
+    CMMT_WTHN,
+    NMBR,
+    STRG,
+    ESCP,
+    SLSH,
+    IDEN_RSRV,
+    HALT
+}
