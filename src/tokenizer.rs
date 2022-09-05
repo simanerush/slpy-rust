@@ -84,25 +84,66 @@ impl<'a> Tokenizer<'a> {
     /// Advance the pointer one character.
     fn advance(&mut self) {
         if self.curr_char() == '\n' {
-            self.row += 1;
-            self.col = 1;
+            self.loc.row += 1;
+            self.loc.col = 1;
         } else {
-            self.col += 1;
+            self.loc.col += 1;
         }
     }
-}
 
-/// Possible states of the state machine.
-enum TokenizerState {
-    INIT,
-    WTHN,
-    TABS,
-    CMMT_INIT,
-    CMMT_WTHN,
-    NMBR,
-    STRG,
-    ESCP,
-    SLSH,
-    IDEN_RSRV,
-    HALT,
+    fn next_token(&mut self) -> Token {
+        match self.curr_char() { 
+            '\n' => {
+                let new_token = Token {
+                    kind: TokenKind::NewLine,
+                    span: Span { 
+                        start: (self.loc), 
+                        end: (self.loc) }
+                };
+                return new_token;
+            }
+            token if token.is_numeric() => {
+                let mut curr_char = self.curr_char();
+                let start_loc = self.loc;
+                let mut number: i32 = token.to_digit(10);
+                
+                while curr_char.is_numeric() {
+                    self.advance();
+                    curr_char = self.curr_char();
+                    number *= 10;
+                    number += curr_char.to_digit(10);
+                }
+
+                let end_loc = self.loc;
+                let new_token = Token {
+                    kind: TokenKind::Number(number),
+                    span: Span { 
+                        start: (start_loc), 
+                        end: (end_loc) }
+                };
+
+                return new_token;
+            }
+            token => {
+                let mut curr_char = self.curr_char();
+                let start_loc = self.loc;
+                let mut name: &str = token;
+                
+                while curr_char.is_alphabetic() {
+                    self.advance();
+                    curr_char = self.curr_char();
+                    
+                }
+
+                let end_loc = self.loc;
+                let new_token = Token {
+                    kind: TokenKind::Number(number),
+                    span: Span { 
+                        start: (start_loc), 
+                        end: (end_loc) }
+                };
+
+                return new_token;
+            }
+        }
 }
