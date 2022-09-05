@@ -1,7 +1,7 @@
 //! The Rust implementation of slpy.
 #![allow(dead_code)]
 
-mod tokenizer;
+pub mod tokenizer;
 use clap::Parser;
 
 /// The slpy programming language.
