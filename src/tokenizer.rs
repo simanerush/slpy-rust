@@ -1,35 +1,42 @@
 //! The lexer.
 
-pub struct Loc {
-    row: usize,
-    col: usize,
-}
+use crate::error::{Error, Kind, Result};
+use crate::{Loc, Span};
 
-pub struct Span {
-    start: Loc,
-    end: Loc,
-}
-
-pub(crate) struct Token<'a> {
-    kind: TokenKind<'a>,
+#[derive(PartialEq, Eq, Debug)]
+pub struct Token {
+    kind: TokenKind,
     span: Span,
 }
 
-#[derive(PartialEq, Eq)]
-pub(crate) enum TokenKind<'a> {
+#[derive(PartialEq, Eq, Debug)]
+pub enum TokenKind {
     NewLine,
-    Name(&'a str),
-    Number(i32),
+    Ident(String),
+    Number(u32),
+    LParen,
+    RParen,
+    Op(Op),
 }
 
-pub(crate) struct TokenStream<'a> {
-    tokens: Vec<Token<'a>>,
+#[derive(PartialEq, Eq, Debug)]
+pub enum Op {
+    Plus,
+    Minus,
+    Times,
+    Div,
+    Mod,
+}
+
+#[derive(Default, PartialEq, Eq, Debug)]
+pub struct TokenStream {
+    tokens: Vec<Token>,
     index: usize,
 }
 
-impl<'a> TokenStream<'a> {
+impl TokenStream {
     /// Append to the token.
-    pub fn append(&mut self, tkn: Token<'a>) {
+    pub fn append(&mut self, tkn: Token) {
         self.tokens.push(tkn);
     }
 
@@ -39,8 +46,9 @@ impl<'a> TokenStream<'a> {
     }
 
     /// Return the current token.
-    pub fn current(&self) -> &'a Token {
-        &self.tokens[self.index]
+    #[must_use]
+    pub fn current(&self) -> Option<&Token> {
+        self.tokens.get(self.index)
     }
 
     /// Advance the token stream.
@@ -51,12 +59,12 @@ impl<'a> TokenStream<'a> {
 
     /// Eat a token of `TokenKind`.
     pub fn eat(&mut self, target: &TokenKind) {
-        assert!(target == &self.current().kind);
+        assert!(&self.current().map_or(false, |i| &i.kind == target));
         self.advance();
     }
 }
 
-pub(crate) struct Tokenizer<'a> {
+pub struct Tokenizer<'a> {
     loc: Loc,
     source: &'a str,
 }
@@ -71,19 +79,20 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// Get the current character.
-    fn curr_char(&self) -> char {
+    ///
+    /// Returns `None` if we're done with the string.
+    fn curr_char(&self) -> Option<char> {
         self.source
             .lines()
-            .nth(self.loc.row - 1)
-            .expect("We are at a valid row.")
+            .nth(self.loc.row - 1)?
             .chars()
+            .chain(std::iter::once('\n')) // force every line to end with a newline
             .nth(self.loc.col - 1)
-            .expect("We are at a valid column.")
     }
 
     /// Advance the pointer one character.
     fn advance(&mut self) {
-        if self.curr_char() == '\n' {
+        if self.curr_char() == Some('\n') {
             self.loc.row += 1;
             self.loc.col = 1;
         } else {
@@ -91,59 +100,216 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    fn next_token(&mut self) -> Token {
-        match self.curr_char() { 
-            '\n' => {
-                let new_token = Token {
-                    kind: TokenKind::NewLine,
-                    span: Span { 
-                        start: (self.loc), 
-                        end: (self.loc) }
-                };
-                return new_token;
-            }
-            token if token.is_numeric() => {
-                let mut curr_char = self.curr_char();
-                let start_loc = self.loc;
-                let mut number: i32 = token.to_digit(10);
-                
-                while curr_char.is_numeric() {
-                    self.advance();
-                    curr_char = self.curr_char();
-                    number *= 10;
-                    number += curr_char.to_digit(10);
-                }
+    /// Parse a token consisting of a single character.
+    fn single_char(&mut self, kind: TokenKind) -> Token {
+        let token = Token {
+            kind,
+            span: Span {
+                start: self.loc,
+                end: self.loc,
+            },
+        };
+        self.advance();
+        token
+    }
 
-                let end_loc = self.loc;
-                let new_token = Token {
-                    kind: TokenKind::Number(number),
-                    span: Span { 
-                        start: (start_loc), 
-                        end: (end_loc) }
-                };
+    /// Parse a token consisting of two characters.
+    fn expect_next(&mut self, kind: TokenKind, next: char) -> Result<Token> {
+        let start = self.loc;
+        self.advance();
 
-                return new_token;
-            }
-            token => {
-                let mut curr_char = self.curr_char();
-                let start_loc = self.loc;
-                let mut name: &str = token;
-                
-                while curr_char.is_alphabetic() {
-                    self.advance();
-                    curr_char = self.curr_char();
-                    
-                }
+        let span = Span {
+            start,
+            end: self.loc,
+        };
 
-                let end_loc = self.loc;
-                let new_token = Token {
-                    kind: TokenKind::Number(number),
-                    span: Span { 
-                        start: (start_loc), 
-                        end: (end_loc) }
-                };
-
-                return new_token;
-            }
+        if self.curr_char() == Some(next) {
+            Ok(Token { kind, span })
+        } else {
+            Err(Error {
+                kind: Kind::Tokenization,
+                span,
+            })
         }
+    }
+
+    /// Parse a token while a condition holds true.
+    ///
+    /// Accum should update some internal state for building the token and return whether to
+    /// continue parsing. Finally should turn the state into a `TokenKind`.
+    fn parse_while<T>(
+        &mut self,
+        mut init: T,
+        accum: impl Fn(&mut T, char) -> bool,
+        finally: impl FnOnce(T) -> TokenKind,
+    ) -> Token {
+        let start = self.loc;
+        let mut end = self.loc;
+
+        while let Some(c) = self.curr_char() {
+            if !accum(&mut init, c) {
+                break;
+            }
+            end = self.loc;
+            self.advance();
+        }
+
+        Token {
+            kind: finally(init),
+            span: Span { start, end },
+        }
+    }
+
+    /// Parse the next token from the string.
+    fn next_token(&mut self) -> Result<Option<Token>> {
+        #[allow(clippy::enum_glob_use)]
+        use self::Op::*;
+        #[allow(clippy::enum_glob_use)]
+        use TokenKind::*;
+
+        Ok(if let Some(c) = self.curr_char() {
+            Some(match c {
+                '\n' => self.single_char(NewLine),
+                '(' => self.single_char(LParen),
+                ')' => self.single_char(RParen),
+                '+' => self.single_char(Op(Plus)),
+                '-' => self.single_char(Op(Minus)),
+                '*' => self.single_char(Op(Times)),
+                '/' => self.expect_next(Op(Div), '/')?,
+                '%' => self.single_char(Op(Mod)),
+                '0'..='9' => self.parse_while(
+                    0,
+                    |n, c| {
+                        c.to_digit(10).map_or(false, |d| {
+                            *n *= 10;
+                            *n += d;
+                            true
+                        })
+                    },
+                    Number,
+                ),
+                'a'..='z' | 'A'..='Z' | '_' => self.parse_while(
+                    String::new(),
+                    |s, c| {
+                        if c.is_alphanumeric() || c == '_' {
+                            s.push(c);
+                            true
+                        } else {
+                            false
+                        }
+                    },
+                    Ident,
+                ),
+                _ => todo!(),
+            })
+        } else {
+            None
+        })
+    }
+
+    /// Lex source into a `TokenStream`.
+    pub fn lex(source: &'a str) -> Result<TokenStream> {
+        let mut tokenizer = Self::new(source);
+        let mut tokens = TokenStream::default();
+
+        while let Some(tkn) = tokenizer.next_token()? {
+            tokens.append(tkn);
+        }
+
+        Ok(tokens)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod next_token {
+        use super::*;
+
+        #[allow(clippy::enum_glob_use)]
+        use super::Op::*;
+        #[allow(clippy::enum_glob_use)]
+        use TokenKind::*;
+
+        /// A `next_token` test case.
+        macro_rules! ntt {
+            ($name:ident: $in:expr => $out:expr) => {
+                #[test]
+                fn $name() -> Result<()> {
+                    assert_eq!(Tokenizer::new($in).next_token()?.unwrap().kind, $out);
+                    Ok(())
+                }
+            };
+        }
+
+        ntt!(l_paren: "(" => LParen);
+        ntt!(r_paren: ")" => RParen);
+        ntt!(newline: "\n" => NewLine);
+        ntt!(plus: "+" => Op(Plus));
+        ntt!(minus: "-" => Op(Minus));
+        ntt!(times: "*" => Op(Times));
+        ntt!(div: "//" => Op(Div));
+        ntt!(modulus: "%" => Op(Mod));
+        ntt!(num: "1234" => Number(1234));
+        ntt!(ident: "abcd" => Ident("abcd".to_string()));
+        ntt!(ident_underscore: "_abcd" => Ident("_abcd".to_string()));
+        ntt!(ident_numbers: "a_124_Bb41" => Ident("a_124_Bb41".to_string()));
+    }
+
+    mod lex {
+        use super::*;
+
+        #[allow(clippy::enum_glob_use)]
+        use super::Op::*;
+        #[allow(clippy::enum_glob_use)]
+        use TokenKind::*;
+
+        macro_rules! tok {
+            ($srow:expr,$scol:expr; $erow:expr,$ecol:expr => $kind:expr) => {
+                Token {
+                    kind: $kind,
+                    span: Span {
+                        start: Loc {
+                            row: $srow,
+                            col: $scol,
+                        },
+                        end: Loc {
+                            row: $erow,
+                            col: $ecol,
+                        },
+                    },
+                }
+            };
+            ($srow:expr,$scol:expr => $kind:expr) => {tok!($srow,$scol;$srow,$scol => $kind)}
+        }
+
+        /// A `lex` test case.
+        macro_rules! lt {
+            ($name:ident: $in:expr => $($out:expr),*) => {
+                #[test]
+                fn $name() -> Result<()> {
+                    assert_eq!(Tokenizer::lex($in)?.tokens, vec![$($out),*]);
+                    Ok(())
+                }
+            };
+        }
+
+        lt! {call: "print(x)" =>
+            tok!(1,1;1,5 => Ident("print".to_string())),
+            tok!(1,6 => LParen),
+            tok!(1,7 => Ident("x".to_string())),
+            tok!(1,8 => RParen),
+            tok!(1,9 => NewLine)
+        }
+
+        lt! {mult: "a_b*y" =>
+            tok!(1,1;1,3 => Ident("a_b".to_string())),
+            tok!(1,4 => Op(Times)),
+            tok!(1,5 => Ident("y".to_string())),
+            tok!(1,6 => NewLine)
+        }
+
+        // TODO: whitespace
+    }
 }
