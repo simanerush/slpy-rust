@@ -14,6 +14,7 @@ pub enum TokenKind {
     NewLine,
     Ident(String),
     Number(u32),
+    Str(String),
     LParen,
     RParen,
     Op(Op),
@@ -26,6 +27,7 @@ pub enum Op {
     Times,
     Div,
     Mod,
+    Eq,
 }
 
 #[derive(Default, PartialEq, Eq, Debug)]
@@ -140,7 +142,7 @@ impl<'a> Tokenizer<'a> {
     fn parse_while<T>(
         &mut self,
         mut init: T,
-        accum: impl Fn(&mut T, char) -> bool,
+        mut accum: impl FnMut(&mut T, char) -> bool,
         finally: impl FnOnce(T) -> TokenKind,
     ) -> Token {
         let start = self.loc;
@@ -167,6 +169,11 @@ impl<'a> Tokenizer<'a> {
         #[allow(clippy::enum_glob_use)]
         use TokenKind::*;
 
+        // skip whitespace that we don't care about
+        while self.curr_char() == Some(' ') || self.curr_char() == Some('\t') {
+            self.advance();
+        }
+
         Ok(if let Some(c) = self.curr_char() {
             Some(match c {
                 '\n' => self.single_char(NewLine),
@@ -177,6 +184,7 @@ impl<'a> Tokenizer<'a> {
                 '*' => self.single_char(Op(Times)),
                 '/' => self.expect_next(Op(Div), '/')?,
                 '%' => self.single_char(Op(Mod)),
+                '=' => self.single_char(Op(Eq)),
                 '0'..='9' => self.parse_while(
                     0,
                     |n, c| {
@@ -200,6 +208,28 @@ impl<'a> Tokenizer<'a> {
                     },
                     Ident,
                 ),
+                '"' => {
+                    let mut seen_even_quotes = true;
+                    self.parse_while(
+                        String::new(),
+                        |s, c| {
+                            if c == '"' {
+                                // this will always be set to false immediately
+                                seen_even_quotes = !seen_even_quotes;
+
+                                // always return true here - we need to advance past the second "
+                                true
+                            } else if seen_even_quotes {
+                                // here we've seen two quotes, so we're done
+                                false
+                            } else {
+                                s.push(c);
+                                true
+                            }
+                        },
+                        Str,
+                    )
+                }
                 _ => todo!(),
             })
         } else {
@@ -251,10 +281,12 @@ mod tests {
         ntt!(times: "*" => Op(Times));
         ntt!(div: "//" => Op(Div));
         ntt!(modulus: "%" => Op(Mod));
+        ntt!(eq: "=" => Op(Eq));
         ntt!(num: "1234" => Number(1234));
         ntt!(ident: "abcd" => Ident("abcd".to_string()));
         ntt!(ident_underscore: "_abcd" => Ident("_abcd".to_string()));
         ntt!(ident_numbers: "a_124_Bb41" => Ident("a_124_Bb41".to_string()));
+        ntt!(str1: "\"a b c\"" => Str("a b c".to_string()));
     }
 
     mod lex {
@@ -308,6 +340,28 @@ mod tests {
             tok!(1,4 => Op(Times)),
             tok!(1,5 => Ident("y".to_string())),
             tok!(1,6 => NewLine)
+        }
+
+        lt! {mult_whitespace: "a_b * y" =>
+            tok!(1,1;1,3 => Ident("a_b".to_string())),
+            tok!(1,5 => Op(Times)),
+            tok!(1,7 => Ident("y".to_string())),
+            tok!(1,8 => NewLine)
+        }
+
+        lt! {two_lines: "x = input(\"Enter a number.\")\nprint(x)" =>
+            tok!(1,1 => Ident("x".to_string())),
+            tok!(1,3 => Op(Eq)),
+            tok!(1,5;1,9 => Ident("input".to_string())),
+            tok!(1,10 => LParen),
+            tok!(1,11;1,27 => Str("Enter a number.".to_string())),
+            tok!(1,28 => RParen),
+            tok!(1,29 => NewLine),
+            tok!(2,1;2,5 => Ident("print".to_string())),
+            tok!(2,6 => LParen),
+            tok!(2,7 => Ident("x".to_string())),
+            tok!(2,8 => RParen),
+            tok!(2,9 => NewLine)
         }
 
         // TODO: whitespace
