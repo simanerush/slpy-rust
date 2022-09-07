@@ -185,6 +185,11 @@ impl<'a> Tokenizer<'a> {
                 '/' => self.expect_next(Op(Div), '/')?,
                 '%' => self.single_char(Op(Mod)),
                 '=' => self.single_char(Op(Eq)),
+                '#' => { 
+                    self.loc.row += 1; 
+                    self.loc.col = 1; 
+                    return self.next_token(); 
+                },
                 '0'..='9' => self.parse_while(
                     0,
                     |n, c| {
@@ -282,6 +287,7 @@ mod tests {
         ntt!(div: "//" => Op(Div));
         ntt!(modulus: "%" => Op(Mod));
         ntt!(eq: "=" => Op(Eq));
+        ntt!(comment: "#\nx" => Ident("x".to_string()));
         ntt!(num: "1234" => Number(1234));
         ntt!(ident: "abcd" => Ident("abcd".to_string()));
         ntt!(ident_underscore: "_abcd" => Ident("_abcd".to_string()));
