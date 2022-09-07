@@ -2,6 +2,7 @@
 
 mod error;
 mod tokenizer;
+mod ast;
 
 pub use error::{Error, Result};
 
