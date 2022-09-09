@@ -18,11 +18,25 @@ struct Blck {
 
 impl Ast for Blck {
     fn span(&self) -> Span {
-       todo!(); 
+       Span { 
+        start: (self.stmts.front().map_or(Loc { row: 1, col: 1 }, Ast::span)), 
+        end: (self.stmts.back().map_or(Loc { row: 1, col: 1 }, Ast::span)) 
+        }
     }
 }
 
-enum Stmt {
+struct Stmt {
+   data: StmtData,
+   span: Span
+} 
+
+impl Ast for Stmt {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+enum StmtData {
     Asgn(String, Expn),
     Pass,
     Prnt(Expn),
@@ -59,7 +73,7 @@ enum BinOp {
 }
 
 struct Leaf {
-    data: Data,
+    data: LeafData,
     span: Span,
 }
 
@@ -69,7 +83,7 @@ impl Ast for Leaf {
     }
 }
 
-enum Data {
+enum LeafData {
     Name(String),
     Nmbr(u32),
     Impt(String),
