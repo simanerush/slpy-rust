@@ -16,4 +16,10 @@ pub struct Error {
 pub enum Kind {
     #[error("tokenization failed")]
     Tokenization,
+
+    #[error("parsing failed")]
+    Parser,
+
+    #[error("unexpected end of file")]
+    UnexpectedEof,
 }

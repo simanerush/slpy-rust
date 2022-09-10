@@ -5,8 +5,8 @@ use crate::{Loc, Span};
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct Token {
-    kind: TokenKind,
-    span: Span,
+    pub kind: TokenKind,
+    pub span: Span,
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -20,7 +20,7 @@ pub enum TokenKind {
     Op(Op),
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub enum Op {
     Plus,
     Minus,
@@ -53,6 +53,23 @@ impl TokenStream {
         self.tokens.get(self.index)
     }
 
+    pub fn current_or(&self) -> Result<&Token> {
+        self.current().ok_or(Error {
+            span: Span {
+                start: self.eof(),
+                end: self.eof(),
+            },
+            kind: Kind::UnexpectedEof,
+        })
+    }
+
+    // Get the location of the end of file.
+    fn eof(&self) -> Loc {
+        self.tokens
+            .last()
+            .map_or(Loc { row: 1, col: 1 }, |t| t.span.end)
+    }
+
     /// Advance the token stream.
     pub fn advance(&mut self) {
         assert!(self.index < self.tokens.len());
@@ -63,6 +80,11 @@ impl TokenStream {
     pub fn eat(&mut self, target: &TokenKind) {
         assert!(&self.current().map_or(false, |i| &i.kind == target));
         self.advance();
+    }
+
+    /// Take the current token from the tokenizer.
+    pub fn take(&mut self) -> Token {
+        self.tokens.remove(self.index)
     }
 }
 
@@ -185,11 +207,11 @@ impl<'a> Tokenizer<'a> {
                 '/' => self.expect_next(Op(Div), '/')?,
                 '%' => self.single_char(Op(Mod)),
                 '=' => self.single_char(Op(Eq)),
-                '#' => { 
-                    self.loc.row += 1; 
-                    self.loc.col = 1; 
-                    return self.next_token(); 
-                },
+                '#' => {
+                    self.loc.row += 1;
+                    self.loc.col = 1;
+                    return self.next_token();
+                }
                 '0'..='9' => self.parse_while(
                     0,
                     |n, c| {
