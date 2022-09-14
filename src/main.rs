@@ -1,6 +1,6 @@
 //! The Rust implementation of slpy.
-use slpy_rust::{repl, Result, dump};
 use clap::Parser;
+use slpy_rust::{dump, repl, Result};
 
 /// The slpy programming language.
 #[derive(Parser, Debug)]
@@ -11,7 +11,7 @@ struct Args {
     file: String,
 
     #[clap(short, long)]
-    dump: bool
+    dump: bool,
 }
 
 fn main() -> Result<()> {

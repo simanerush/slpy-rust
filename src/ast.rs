@@ -35,7 +35,7 @@ pub trait Ast: Sized {
     fn parse_and_eval(mut tokens: TokenStream, ctx: &mut Context) -> Result<Self::Output> {
         Self::parse(&mut tokens)?.eval(ctx)
     }
-    
+
     fn dump(&self, indent: usize) -> String;
 }
 
@@ -77,9 +77,13 @@ impl Ast for Blck {
     }
 
     fn dump(&self, indent: usize) -> String {
-        " ".repeat(indent) + "Blck\n" + &self.stmts.iter()
-                                                  .map(|s| s.dump(indent + 1))
-                                                  .fold(String::new(), |s, n| s + &n + "\n")
+        " ".repeat(indent)
+            + "Blck\n"
+            + &self
+                .stmts
+                .iter()
+                .map(|s| s.dump(indent + 1))
+                .fold(String::new(), |s, n| s + &n + "\n")
     }
 }
 
@@ -126,7 +130,6 @@ impl Stmt {
             data: StmtData::Prnt(expn),
         })
     }
-    
 }
 
 impl Ast for Stmt {
@@ -175,7 +178,14 @@ impl Ast for Stmt {
 
     fn dump(&self, indent: usize) -> String {
         match &self.data {
-            StmtData::Asgn(name, expn) => " ".repeat(indent) + "Asgn\n" + &" ".repeat(indent + 1) + &name + "\n" + &expn.dump(indent + 1),
+            StmtData::Asgn(name, expn) => {
+                " ".repeat(indent)
+                    + "Asgn\n"
+                    + &" ".repeat(indent + 1)
+                    + &name
+                    + "\n"
+                    + &expn.dump(indent + 1)
+            }
             StmtData::Prnt(expn) => " ".repeat(indent) + "Prnt\n" + &expn.dump(indent + 1),
             StmtData::Pass => " ".repeat(indent) + "Pass",
         }
@@ -283,7 +293,14 @@ impl Ast for Expn {
 
     fn dump(&self, indent: usize) -> String {
         match &self {
-            Self::BinOp { left, right, op } => " ".repeat(indent) + op.as_str() + "\n" + &left.dump(indent + 1) + "\n" + &right.dump(indent + 1),
+            Self::BinOp { left, right, op } => {
+                " ".repeat(indent)
+                    + op.as_str()
+                    + "\n"
+                    + &left.dump(indent + 1)
+                    + "\n"
+                    + &right.dump(indent + 1)
+            }
             Self::Leaf(l) => l.dump(indent),
         }
     }
@@ -345,7 +362,7 @@ impl BinOp {
             Self::Times => "Tmes",
             Self::Div => "IDiv",
             Self::Mod => "Modu",
-            Self::Expt => "Expt"
+            Self::Expt => "Expt",
         }
     }
 }
@@ -382,9 +399,20 @@ impl Leaf {
 
     fn dump(&self, indent: usize) -> String {
         match &self.data {
-            LeafData::Name(name) => " ".repeat(indent) + "Lkup\n" + &" ".repeat(indent+1) + name.as_str(),
-            LeafData::Inpt(prompt) => " ".repeat(indent) + "Inpt\n" + &" ".repeat(indent+1) + "\"" + prompt.as_str() + "\"",
-            LeafData::Nmbr(num) => " ".repeat(indent) + "Nmbr\n" + &" ".repeat(indent+1) + &num.to_string(),
+            LeafData::Name(name) => {
+                " ".repeat(indent) + "Lkup\n" + &" ".repeat(indent + 1) + name.as_str()
+            }
+            LeafData::Inpt(prompt) => {
+                " ".repeat(indent)
+                    + "Inpt\n"
+                    + &" ".repeat(indent + 1)
+                    + "\""
+                    + prompt.as_str()
+                    + "\""
+            }
+            LeafData::Nmbr(num) => {
+                " ".repeat(indent) + "Nmbr\n" + &" ".repeat(indent + 1) + &num.to_string()
+            }
         }
     }
 }
@@ -499,10 +527,7 @@ mod tests {
 
             dump_test!(num: "3" => "Nmbr\n 3");
             dump_test!(num_indented: "3", 2 => "  Nmbr\n   3");
-
-
         }
-
     }
 
     mod expn {
@@ -528,7 +553,6 @@ mod tests {
             }
 
             dump_test!(plus: "3 + 2" => "Plus\n Nmbr\n  3\n Nmbr\n  2");
-
         }
 
         mod eval {
