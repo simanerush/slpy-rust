@@ -1,10 +1,12 @@
 #![allow(dead_code)]
 
-mod error;
-mod tokenizer;
 mod ast;
+mod error;
+mod repl;
+mod tokenizer;
 
 pub use error::{Error, Result};
+pub use repl::repl;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Loc {

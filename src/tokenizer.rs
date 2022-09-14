@@ -28,6 +28,7 @@ pub enum Op {
     Div,
     Mod,
     Eq,
+    Expt,
 }
 
 #[derive(Default, PartialEq, Eq, Debug)]
@@ -124,6 +125,20 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    /// Back the pointer up one character.
+    fn backup(&mut self) {
+        if self.loc.col == 1 {
+            self.loc.row -= 1;
+            self.loc.col = 1;
+            // go to the end of the line
+            while self.curr_char().map_or(false, |c| c != '\n') {
+                self.advance();
+            }
+        } else {
+            self.loc.col -= 1;
+        }
+    }
+
     /// Parse a token consisting of a single character.
     fn single_char(&mut self, kind: TokenKind) -> Token {
         let token = Token {
@@ -148,6 +163,7 @@ impl<'a> Tokenizer<'a> {
         };
 
         if self.curr_char() == Some(next) {
+            self.advance();
             Ok(Token { kind, span })
         } else {
             Err(Error {
@@ -184,6 +200,13 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    fn next_or(&mut self, next: char, kind: TokenKind, fallback: TokenKind) -> Result<Token> {
+        self.expect_next(kind, next).or_else(|_| {
+            self.backup();
+            Ok(self.single_char(fallback))
+        })
+    }
+
     /// Parse the next token from the string.
     fn next_token(&mut self) -> Result<Option<Token>> {
         #[allow(clippy::enum_glob_use)]
@@ -203,7 +226,8 @@ impl<'a> Tokenizer<'a> {
                 ')' => self.single_char(RParen),
                 '+' => self.single_char(Op(Plus)),
                 '-' => self.single_char(Op(Minus)),
-                '*' => self.single_char(Op(Times)),
+                '*' => self.next_or('*', Op(Expt), Op(Times))?,
+                // TODO: should this advance twice?
                 '/' => self.expect_next(Op(Div), '/')?,
                 '%' => self.single_char(Op(Mod)),
                 '=' => self.single_char(Op(Eq)),
@@ -353,6 +377,13 @@ mod tests {
                     Ok(())
                 }
             };
+        }
+
+        lt! {expt: "2 ** 3" =>
+            tok!(1,1 => Number(2)),
+            tok!(1,3;1,4 => Op(Expt)),
+            tok!(1,6 => Number(3)),
+            tok!(1,7 => NewLine)
         }
 
         lt! {call: "print(x)" =>

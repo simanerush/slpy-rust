@@ -2,18 +2,39 @@
 //!
 //! TODO: error handling
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use crate::error::{Error, Kind, Result};
 use crate::tokenizer::{Op, Token, TokenKind, TokenStream};
 use crate::{Loc, Span};
 
-trait Ast {
+type SlpyObject = i32;
+
+#[derive(Default)]
+pub struct Context(HashMap<String, SlpyObject>);
+
+impl Context {
+    fn get(&self, name: &str) -> Option<SlpyObject> {
+        self.0.get(name).copied()
+    }
+
+    fn set(&mut self, name: String, val: i32) {
+        self.0.insert(name, val);
+    }
+}
+
+pub trait Ast: Sized {
+    type Output;
+
     fn span(&self) -> Span;
-    fn parse(tokens: &mut TokenStream) -> Result<Self>
-    where
-        Self: Sized;
-    // fn run(&self);
+
+    fn parse(tokens: &mut TokenStream) -> Result<Self>;
+
+    fn eval(self, ctx: &mut Context) -> Result<Self::Output>;
+
+    fn parse_and_eval(mut tokens: TokenStream, ctx: &mut Context) -> Result<Self::Output> {
+        Self::parse(&mut tokens)?.eval(ctx)
+    }
 }
 
 struct Blck {
@@ -21,6 +42,8 @@ struct Blck {
 }
 
 impl Ast for Blck {
+    type Output = ();
+
     fn span(&self) -> Span {
         Span {
             start: self
@@ -38,14 +61,22 @@ impl Ast for Blck {
         let mut stmts = VecDeque::new();
         while tokens.current().is_some() {
             stmts.push_back(Stmt::parse(tokens)?);
+            tokens.eat(&TokenKind::NewLine);
         }
 
         Ok(Self { stmts })
     }
+
+    fn eval(self, ctx: &mut Context) -> Result<Self::Output> {
+        for stmt in self.stmts {
+            stmt.eval(ctx)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]
-struct Stmt {
+pub struct Stmt {
     data: StmtData,
     span: Span,
 }
@@ -90,6 +121,8 @@ impl Stmt {
 }
 
 impl Ast for Stmt {
+    type Output = ();
+
     fn span(&self) -> Span {
         self.span
     }
@@ -115,6 +148,21 @@ impl Ast for Stmt {
             },
         )
     }
+
+    fn eval(self, ctx: &mut Context) -> Result<()> {
+        match self.data {
+            StmtData::Asgn(name, expn) => {
+                let val = expn.eval(ctx)?;
+                ctx.set(name, val);
+            }
+            StmtData::Prnt(e) => {
+                println!("{}", e.eval(ctx)?);
+            }
+            StmtData::Pass => {}
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -125,7 +173,7 @@ enum StmtData {
 }
 
 #[derive(PartialEq, Eq, Debug)]
-enum Expn {
+pub enum Expn {
     BinOp {
         left: Box<Self>,
         right: Box<Self>,
@@ -164,7 +212,7 @@ impl Expn {
                 TokenKind::RParen => {
                     break;
                 }
-                TokenKind::Op(op) => BinOp::from(op),
+                TokenKind::Op(op) => BinOp::from_token(op, span)?,
                 _ => {
                     return Err(Error {
                         span,
@@ -173,14 +221,14 @@ impl Expn {
                 }
             };
 
-            let (l_bp, _) = op.bp();
+            let (l_bp, r_bp) = op.bp();
             if l_bp < min_bp {
                 // done with this parse tree
                 break;
             }
 
             tokens.advance();
-            let rhs = Self::parse_impl(tokens, l_bp)?;
+            let rhs = Self::parse_impl(tokens, r_bp)?;
             lhs = Self::BinOp {
                 left: Box::new(lhs),
                 right: Box::new(rhs),
@@ -193,6 +241,8 @@ impl Expn {
 }
 
 impl Ast for Expn {
+    type Output = SlpyObject;
+
     fn span(&self) -> Span {
         match self {
             Self::Leaf(leaf) => leaf.span(),
@@ -206,6 +256,13 @@ impl Ast for Expn {
     fn parse(tokens: &mut TokenStream) -> Result<Self> {
         Self::parse_impl(tokens, 0)
     }
+
+    fn eval(self, ctx: &mut Context) -> Result<Self::Output> {
+        match self {
+            Self::BinOp { left, right, op } => Ok(op.eval(left.eval(ctx)?, right.eval(ctx)?)),
+            Self::Leaf(l) => l.eval(ctx),
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
@@ -218,25 +275,42 @@ enum BinOp {
     Expt,
 }
 
-impl From<Op> for BinOp {
-    fn from(op: Op) -> Self {
-        match op {
+impl BinOp {
+    fn from_token(op: Op, span: Span) -> Result<Self> {
+        Ok(match op {
             Op::Plus => Self::Plus,
             Op::Minus => Self::Minus,
             Op::Times => Self::Times,
             Op::Div => Self::Div,
             Op::Mod => Self::Mod,
-            Op::Eq => panic!(),
-        }
+            Op::Expt => Self::Expt,
+            Op::Eq => {
+                return Err(Error {
+                    kind: Kind::Parser,
+                    span,
+                });
+            }
+        })
     }
-}
 
-impl BinOp {
     const fn bp(self) -> (u8, u8) {
         match self {
             Self::Plus | Self::Minus => (1, 2),
             Self::Times | Self::Div | Self::Mod => (3, 4),
-            Self::Expt => (5, 6),
+            Self::Expt => (6, 5),
+        }
+    }
+
+    fn eval(self, lhs: SlpyObject, rhs: SlpyObject) -> SlpyObject {
+        match self {
+            Self::Plus => lhs + rhs,
+            Self::Minus => lhs - rhs,
+            Self::Times => lhs * rhs,
+            Self::Div => lhs / rhs,
+            Self::Mod => lhs % rhs,
+            // if rhs is negative, then we have a fractionl result as the output, which we round to
+            // zero.
+            Self::Expt => u32::try_from(rhs).map_or_else(|_| 0, |n| lhs.pow(n)),
         }
     }
 }
@@ -248,12 +322,33 @@ struct Leaf {
 }
 
 impl Leaf {
-    fn parse_inpt(_tokens: &mut TokenStream) -> Result<Self> {
-        todo!();
+    fn parse_inpt(tokens: &mut TokenStream) -> Result<Self> {
+        // todo: fix
+        let start = tokens.current().unwrap().span.start;
+        tokens.eat(&TokenKind::Ident("input".to_string()));
+        tokens.eat(&TokenKind::LParen);
+        let tkn = tokens.current_or()?;
+        let prompt = if let TokenKind::Str(s) = &tkn.kind {
+            s.to_string()
+        } else {
+            return Err(Error {
+                span: tkn.span,
+                kind: Kind::Parser,
+            });
+        };
+        let end = tokens.current().unwrap().span.end;
+        tokens.advance();
+        tokens.eat(&TokenKind::RParen);
+        Ok(Self {
+            span: Span { start, end },
+            data: LeafData::Inpt(prompt),
+        })
     }
 }
 
 impl Ast for Leaf {
+    type Output = SlpyObject;
+
     fn span(&self) -> Span {
         self.span
     }
@@ -274,6 +369,29 @@ impl Ast for Leaf {
             _ => panic!(),
         })
     }
+
+    fn eval(self, ctx: &mut Context) -> Result<Self::Output> {
+        let err = Error {
+            kind: Kind::Interpretation,
+            span: self.span,
+        };
+        Ok(match self.data {
+            LeafData::Name(s) => ctx.get(s.as_str()).ok_or(err)?,
+            // TODO: handle too-large numbers gracefully
+            #[allow(clippy::cast_possible_wrap)]
+            LeafData::Nmbr(n) => n as SlpyObject,
+            LeafData::Inpt(s) => {
+                print!("{}", s);
+                let mut buffer = String::new();
+                if std::io::stdin().read_line(&mut buffer).is_ok() {
+                    if let Ok(n) = buffer.parse() {
+                        return Ok(n);
+                    }
+                }
+                return Err(err);
+            }
+        })
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -283,11 +401,13 @@ enum LeafData {
     Inpt(String),
 }
 
-struct Prgm {
+pub struct Prgm {
     main: Blck,
 }
 
 impl Ast for Prgm {
+    type Output = ();
+
     fn span(&self) -> Span {
         self.main.span()
     }
@@ -297,8 +417,11 @@ impl Ast for Prgm {
             main: Blck::parse(tokens)?,
         })
     }
-}
 
+    fn eval(self, ctx: &mut Context) -> Result<()> {
+        self.main.eval(ctx)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -312,7 +435,39 @@ mod tests {
         //     ($name:ident: $in:expn => $out:expn ) => ()
         // }
 
-        macro_rules! num {
+        mod eval {
+            use super::*;
+
+            macro_rules! eval_test {
+                ($name:ident: $in:expr => $out:expr) => {
+                    #[test]
+                    fn $name() {
+                        let mut tokens = Tokenizer::lex($in).unwrap();
+                        let expn = Expn::parse(&mut tokens).unwrap();
+                        assert_eq!(expn.eval(&mut Context::default()).unwrap(), $out);
+                    }
+                };
+            }
+
+            eval_test!(minus_assoc: "1 - 2 - 3" => -4);
+            eval_test!(minus_grouped: "1 - (2 - 3)" => 2);
+            eval_test!(two_plus_two: "2+2" => 4);
+            eval_test!(mod_assoc: "(2*3) + 14 % 10" => 10);
+            eval_test!(expt_assoc: "4 ** 3 ** 2" => 262_144);
+            eval_test!(expt_paren: "(4 ** 3) ** 2" => 4096);
+            eval_test!(div: "4 // 3" => 1);
+            eval_test!(harder_div: "30 // 7" => 4);
+            eval_test!(times_precedence: "2 + 5 * 6" => 32);
+            eval_test!(expt_and_times_precedence: "1 ** 2 + 5 * 6" => 31);
+            eval_test!(double_expt_and_times_precedence: "3 ** 1 ** 2 + 5 * 6" => 33);
+            eval_test!(times_and_div_precedence: "5 * 6 // 7" => 4);
+            eval_test!(perry_hard: "3 ** 1 ** 2 + 5 * 6 // 7" => 7);
+        }
+
+        mod parse {
+            use super::*;
+
+            macro_rules! num {
             ($srow:expr,$scol:expr; $erow:expr,$ecol:expr => $num:expr) => {
                 Box::new(Expn::Leaf(Leaf {
                     data: LeafData::Nmbr($num),
@@ -331,75 +486,101 @@ mod tests {
             ($srow:expr,$scol:expr => $num:expr) => {num!($srow,$scol;$srow,$scol => $num)}
         }
 
-        #[test]
-        fn two_plus_two() {
-            let mut tokens = Tokenizer::lex("2+2").unwrap();
-            let expn = Expn::parse(&mut tokens).unwrap();
+            #[test]
+            fn two_plus_two() {
+                let mut tokens = Tokenizer::lex("2+2").unwrap();
+                let expn = Expn::parse(&mut tokens).unwrap();
 
-            assert_eq!(expn, Expn::BinOp {
-                left: num!(1,1 => 2),
-                op: BinOp::Plus,
-                right: num!(1,3 => 2),
-            });
-        }
-
-        #[test]
-        fn two_plus_two_times_four() {
-            let mut tokens = Tokenizer::lex("2+2*4").unwrap();
-            let expn = Expn::parse(&mut tokens).unwrap();
-
-            assert_eq!(expn, Expn::BinOp {
-                left: num!(1,1 => 2),
-                op: BinOp::Plus,
-                right: Box::new(Expn::BinOp {
-                    left: num!(1,3 => 2),
-                    op: BinOp::Times,
-                    right: num!(1,5 => 4),
-                })
-            });
-        }
-
-        #[test]
-        fn paren_two_plus_two_times_four() {
-            let mut tokens = Tokenizer::lex("(2+2)*4").unwrap();
-            let expn = Expn::parse(&mut tokens).unwrap();
-
-            assert_eq!(expn, Expn::BinOp {
-                left: Box::new(Expn::BinOp {
-                    left: num!(1,2 => 2),
-                    op: BinOp::Plus,
-                    right: num!(1,4 => 2),
-                }),
-                op: BinOp::Times,
-                right: num!(1,7 => 4),
-            });
-        }
-
-        #[test]
-        fn assgn() {
-            let mut tokens = Tokenizer::lex("x=2+2").unwrap();
-            let stmt = Stmt::parse(&mut tokens).unwrap();
-
-            assert_eq!(stmt, Stmt {
-                span: Span {
-                    start: Loc {
-                        row: 1,
-                        col: 1,
-                    },
-                    end: Loc {
-                        row: 1,
-                        col: 5
-                    },
-                },
-                data: StmtData::Asgn(
-                    "x".to_string(),
+                assert_eq!(
+                    expn,
                     Expn::BinOp {
-                        left: num!(1,3 => 2),
+                        left: num!(1,1 => 2),
                         op: BinOp::Plus,
-                        right: num!(1,5 => 2)
+                        right: num!(1,3 => 2),
                     }
-                ),
-            });
+                );
+            }
+
+            #[test]
+            fn plus_assoc() {
+                let mut tokens = Tokenizer::lex("2+3+4").unwrap();
+                let expn = Expn::parse(&mut tokens).unwrap();
+
+                assert_eq!(
+                    expn,
+                    Expn::BinOp {
+                        left: Box::new(Expn::BinOp {
+                            left: num!(1,1 => 2),
+                            op: BinOp::Plus,
+                            right: num!(1,3 => 3),
+                        }),
+                        op: BinOp::Plus,
+                        right: num!(1,5 => 4),
+                    }
+                );
+            }
+
+            #[test]
+            fn two_plus_two_times_four() {
+                let mut tokens = Tokenizer::lex("2+2*4").unwrap();
+                let expn = Expn::parse(&mut tokens).unwrap();
+
+                assert_eq!(
+                    expn,
+                    Expn::BinOp {
+                        left: num!(1,1 => 2),
+                        op: BinOp::Plus,
+                        right: Box::new(Expn::BinOp {
+                            left: num!(1,3 => 2),
+                            op: BinOp::Times,
+                            right: num!(1,5 => 4),
+                        })
+                    }
+                );
+            }
+
+            #[test]
+            fn paren_two_plus_two_times_four() {
+                let mut tokens = Tokenizer::lex("(2+2)*4").unwrap();
+                let expn = Expn::parse(&mut tokens).unwrap();
+
+                assert_eq!(
+                    expn,
+                    Expn::BinOp {
+                        left: Box::new(Expn::BinOp {
+                            left: num!(1,2 => 2),
+                            op: BinOp::Plus,
+                            right: num!(1,4 => 2),
+                        }),
+                        op: BinOp::Times,
+                        right: num!(1,7 => 4),
+                    }
+                );
+            }
+
+            #[test]
+            fn assgn() {
+                let mut tokens = Tokenizer::lex("x=2+2").unwrap();
+                let stmt = Stmt::parse(&mut tokens).unwrap();
+
+                assert_eq!(
+                    stmt,
+                    Stmt {
+                        span: Span {
+                            start: Loc { row: 1, col: 1 },
+                            end: Loc { row: 1, col: 5 },
+                        },
+                        data: StmtData::Asgn(
+                            "x".to_string(),
+                            Expn::BinOp {
+                                left: num!(1,3 => 2),
+                                op: BinOp::Plus,
+                                right: num!(1,5 => 2)
+                            }
+                        ),
+                    }
+                );
+            }
         }
     }
 }

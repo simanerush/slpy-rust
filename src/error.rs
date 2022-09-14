@@ -22,4 +22,7 @@ pub enum Kind {
 
     #[error("unexpected end of file")]
     UnexpectedEof,
+
+    #[error("interpretation failed")]
+    Interpretation,
 }
