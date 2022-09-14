@@ -8,7 +8,7 @@ use slpy_rust::{dump, repl, Result};
 struct Args {
     /// Name of the person to greet
     #[clap(short, long)]
-    file: String,
+    file: Option<String>,
 
     #[clap(short, long)]
     dump: bool,
@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     // TODO: debugging, pretty-printing, better argument handling
 
     if args.dump {
-        dump(args.file)
+        dump(args.file.expect("file must be provided in dump mode"))
     } else {
         repl()
     }
