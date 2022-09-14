@@ -35,6 +35,8 @@ pub trait Ast: Sized {
     fn parse_and_eval(mut tokens: TokenStream, ctx: &mut Context) -> Result<Self::Output> {
         Self::parse(&mut tokens)?.eval(ctx)
     }
+    
+    fn dump(&self, indent: usize) -> String;
 }
 
 struct Blck {
@@ -72,6 +74,12 @@ impl Ast for Blck {
             stmt.eval(ctx)?;
         }
         Ok(())
+    }
+
+    fn dump(&self, indent: usize) -> String {
+        " ".repeat(indent) + "Blck\n" + &self.stmts.iter()
+                                                  .map(|s| s.dump(indent + 1))
+                                                  .fold(String::new(), |s, n| s + &n + "\n")
     }
 }
 
@@ -118,6 +126,7 @@ impl Stmt {
             data: StmtData::Prnt(expn),
         })
     }
+    
 }
 
 impl Ast for Stmt {
@@ -162,6 +171,14 @@ impl Ast for Stmt {
         }
 
         Ok(())
+    }
+
+    fn dump(&self, indent: usize) -> String {
+        match &self.data {
+            StmtData::Asgn(name, expn) => " ".repeat(indent) + "Asgn\n" + &" ".repeat(indent + 1) + &name + "\n" + &expn.dump(indent + 1),
+            StmtData::Prnt(expn) => " ".repeat(indent) + "Prnt\n" + &expn.dump(indent + 1),
+            StmtData::Pass => " ".repeat(indent) + "Pass",
+        }
     }
 }
 
@@ -263,6 +280,13 @@ impl Ast for Expn {
             Self::Leaf(l) => l.eval(ctx),
         }
     }
+
+    fn dump(&self, indent: usize) -> String {
+        match &self {
+            Self::BinOp { left, right, op } => " ".repeat(indent) + op.as_str() + "\n" + &left.dump(indent + 1) + "\n" + &right.dump(indent + 1),
+            Self::Leaf(l) => l.dump(indent),
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
@@ -313,6 +337,17 @@ impl BinOp {
             Self::Expt => u32::try_from(rhs).map_or_else(|_| 0, |n| lhs.pow(n)),
         }
     }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Plus => "Plus",
+            Self::Minus => "Mnus",
+            Self::Times => "Tmes",
+            Self::Div => "IDiv",
+            Self::Mod => "Modu",
+            Self::Expt => "Expt"
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -343,6 +378,14 @@ impl Leaf {
             span: Span { start, end },
             data: LeafData::Inpt(prompt),
         })
+    }
+
+    fn dump(&self, indent: usize) -> String {
+        match &self.data {
+            LeafData::Name(name) => " ".repeat(indent) + "Lkup\n" + &" ".repeat(indent+1) + name.as_str(),
+            LeafData::Inpt(prompt) => " ".repeat(indent) + "Inpt\n" + &" ".repeat(indent+1) + "\"" + prompt.as_str() + "\"",
+            LeafData::Nmbr(num) => " ".repeat(indent) + "Nmbr\n" + &" ".repeat(indent+1) + &num.to_string(),
+        }
     }
 }
 
@@ -392,6 +435,10 @@ impl Ast for Leaf {
             }
         })
     }
+
+    fn dump(&self, indent: usize) -> String {
+        todo!()
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -421,11 +468,42 @@ impl Ast for Prgm {
     fn eval(self, ctx: &mut Context) -> Result<()> {
         self.main.eval(ctx)
     }
+
+    fn dump(&self, indent: usize) -> String {
+        " ".repeat(indent) + "Prgm\n" + &self.main.dump(indent + 1)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod leaf {
+        use super::*;
+        use crate::tokenizer::Tokenizer;
+
+        mod dump {
+            use super::*;
+
+            macro_rules! dump_test {
+                ($name:ident: $in:expr, $indent:expr => $out:expr) => {
+                    #[test]
+                    fn $name() {
+                        let mut tokens = Tokenizer::lex($in).unwrap();
+                        let leaf = Leaf::parse(&mut tokens).unwrap();
+                        assert_eq!(leaf.dump($indent).as_str(), $out)
+                    }
+                };
+                ($name:ident: $in:expr => $out:expr) => { dump_test!($name: $in, 0 => $out); }
+            }
+
+            dump_test!(num: "3" => "Nmbr\n 3");
+            dump_test!(num_indented: "3", 2 => "  Nmbr\n   3");
+
+
+        }
+
+    }
 
     mod expn {
         use super::*;
@@ -434,6 +512,24 @@ mod tests {
         // macro_rules! expn_test {
         //     ($name:ident: $in:expn => $out:expn ) => ()
         // }
+        mod dump {
+            use super::*;
+
+            macro_rules! dump_test {
+                ($name:ident: $in:expr, $indent:expr => $out:expr) => {
+                    #[test]
+                    fn $name() {
+                        let mut tokens = Tokenizer::lex($in).unwrap();
+                        let leaf = Expn::parse(&mut tokens).unwrap();
+                        assert_eq!(leaf.dump($indent).as_str(), $out)
+                    }
+                };
+                ($name:ident: $in:expr => $out:expr) => { dump_test!($name: $in, 0 => $out); }
+            }
+
+            dump_test!(plus: "3 + 2" => "Plus\n Nmbr\n  3\n Nmbr\n  2");
+
+        }
 
         mod eval {
             use super::*;
