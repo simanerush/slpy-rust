@@ -182,7 +182,7 @@ impl Ast for Stmt {
                 " ".repeat(indent)
                     + "Asgn\n"
                     + &" ".repeat(indent + 1)
-                    + &name
+                    + name
                     + "\n"
                     + &expn.dump(indent + 1)
             }
@@ -307,7 +307,7 @@ impl Ast for Expn {
 }
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
-enum BinOp {
+pub enum BinOp {
     Plus,
     Minus,
     Times,
@@ -317,7 +317,7 @@ enum BinOp {
 }
 
 impl BinOp {
-    fn from_token(op: Op, span: Span) -> Result<Self> {
+    const fn from_token(op: Op, span: Span) -> Result<Self> {
         Ok(match op {
             Op::Plus => Self::Plus,
             Op::Minus => Self::Minus,
@@ -355,7 +355,7 @@ impl BinOp {
         }
     }
 
-    fn as_str(self) -> &'static str {
+    const fn as_str(self) -> &'static str {
         match self {
             Self::Plus => "Plus",
             Self::Minus => "Mnus",
@@ -368,7 +368,7 @@ impl BinOp {
 }
 
 #[derive(PartialEq, Eq, Debug)]
-struct Leaf {
+pub struct Leaf {
     data: LeafData,
     span: Span,
 }
@@ -395,25 +395,6 @@ impl Leaf {
             span: Span { start, end },
             data: LeafData::Inpt(prompt),
         })
-    }
-
-    fn dump(&self, indent: usize) -> String {
-        match &self.data {
-            LeafData::Name(name) => {
-                " ".repeat(indent) + "Lkup\n" + &" ".repeat(indent + 1) + name.as_str()
-            }
-            LeafData::Inpt(prompt) => {
-                " ".repeat(indent)
-                    + "Inpt\n"
-                    + &" ".repeat(indent + 1)
-                    + "\""
-                    + prompt.as_str()
-                    + "\""
-            }
-            LeafData::Nmbr(num) => {
-                " ".repeat(indent) + "Nmbr\n" + &" ".repeat(indent + 1) + &num.to_string()
-            }
-        }
     }
 }
 
@@ -465,7 +446,22 @@ impl Ast for Leaf {
     }
 
     fn dump(&self, indent: usize) -> String {
-        todo!()
+        match &self.data {
+            LeafData::Name(name) => {
+                " ".repeat(indent) + "Lkup\n" + &" ".repeat(indent + 1) + name.as_str()
+            }
+            LeafData::Inpt(prompt) => {
+                " ".repeat(indent)
+                    + "Inpt\n"
+                    + &" ".repeat(indent + 1)
+                    + "\""
+                    + prompt.as_str()
+                    + "\""
+            }
+            LeafData::Nmbr(num) => {
+                " ".repeat(indent) + "Nmbr\n" + &" ".repeat(indent + 1) + &num.to_string()
+            }
+        }
     }
 }
 
