@@ -12,6 +12,7 @@ pub struct Token {
 #[derive(PartialEq, Eq, Debug)]
 pub enum TokenKind {
     NewLine,
+    Comma,
     Ident(String),
     Number(u32),
     Str(String),
@@ -224,10 +225,10 @@ impl<'a> Tokenizer<'a> {
                 '\n' => self.single_char(NewLine),
                 '(' => self.single_char(LParen),
                 ')' => self.single_char(RParen),
+                ',' => self.single_char(Comma),
                 '+' => self.single_char(Op(Plus)),
                 '-' => self.single_char(Op(Minus)),
                 '*' => self.next_or('*', Op(Expt), Op(Times))?,
-                // TODO: should this advance twice?
                 '/' => self.expect_next(Op(Div), '/')?,
                 '%' => self.single_char(Op(Mod)),
                 '=' => self.single_char(Op(Eq)),
@@ -324,6 +325,7 @@ mod tests {
             };
         }
 
+        ntt!(comma: "," => Comma);
         ntt!(l_paren: "(" => LParen);
         ntt!(r_paren: ")" => RParen);
         ntt!(newline: "\n" => NewLine);

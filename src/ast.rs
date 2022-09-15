@@ -122,12 +122,19 @@ impl Stmt {
         let start = tokens.current().unwrap().span.start;
         tokens.eat(&TokenKind::Ident("print".to_string()));
         tokens.eat(&TokenKind::LParen);
-        let expn = Expn::parse(tokens)?;
+        let mut expns = vec![Expn::parse(tokens)?];
+        while tokens
+            .current()
+            .map_or(false, |t| t.kind == TokenKind::Comma)
+        {
+            tokens.eat(&TokenKind::Comma);
+            expns.push(Expn::parse(tokens)?);
+        }
         let end = tokens.current().unwrap().span.end;
         tokens.eat(&TokenKind::RParen);
         Ok(Self {
             span: Span { start, end },
-            data: StmtData::Prnt(expn),
+            data: StmtData::Prnt(expns),
         })
     }
 }
@@ -167,8 +174,15 @@ impl Ast for Stmt {
                 let val = expn.eval(ctx)?;
                 ctx.set(name, val);
             }
-            StmtData::Prnt(e) => {
-                println!("{}", e.eval(ctx)?);
+            StmtData::Prnt(expns) => {
+                println!(
+                    "{}",
+                    expns
+                        .into_iter()
+                        .flat_map(|e| e.eval(ctx).map(|n| n.to_string()))
+                        .fold(String::new(), |s, n| s + &n + " ")
+                        .trim_end()
+                );
             }
             StmtData::Pass => {}
         }
@@ -186,7 +200,15 @@ impl Ast for Stmt {
                     + "\n"
                     + &expn.dump(indent + 1)
             }
-            StmtData::Prnt(expn) => " ".repeat(indent) + "Prnt\n" + &expn.dump(indent + 1),
+            StmtData::Prnt(expn) => {
+                " ".repeat(indent)
+                    + "Prnt\n"
+                    + expn
+                        .iter()
+                        .map(|e| e.dump(indent + 1))
+                        .fold(String::new(), |s, n| s + &n + "\n")
+                        .trim_end()
+            }
             StmtData::Pass => " ".repeat(indent) + "Pass",
         }
     }
@@ -196,7 +218,7 @@ impl Ast for Stmt {
 enum StmtData {
     Asgn(String, Expn),
     Pass,
-    Prnt(Expn),
+    Prnt(Vec<Expn>),
 }
 
 #[derive(PartialEq, Eq, Debug)]
