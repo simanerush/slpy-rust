@@ -106,9 +106,26 @@ impl Stmt {
             }
         };
 
-        tokens.eat(&TokenKind::Op(Op::Eq));
-        let expn = Expn::parse(tokens)?;
+        let tkn = tokens.current_or()?;
+        let span = tkn.span;
 
+        let expn = if tkn.kind == TokenKind::Op(Op::AddEq) {
+            tokens.advance();
+            let constant = Expn::parse(tokens)?;
+            Expn::BinOp {
+                left: Box::new(Expn::Leaf(Leaf {
+                    data: LeafData::Name(name.clone()),
+                    span,
+                })),
+                right: Box::new(constant),
+                op: BinOp::Plus
+            }
+        } else {
+            tokens.eat(&TokenKind::Op(Op::Eq));
+
+            Expn::parse(tokens)?
+        };
+            
         Ok(Self {
             span: Span {
                 start,
@@ -116,6 +133,7 @@ impl Stmt {
             },
             data: StmtData::Asgn(name, expn),
         })
+
     }
 
     fn parse_prnt(tokens: &mut TokenStream) -> Result<Self> {
@@ -347,7 +365,7 @@ impl BinOp {
             Op::Div => Self::Div,
             Op::Mod => Self::Mod,
             Op::Expt => Self::Expt,
-            Op::Eq => {
+            Op::Eq | Op::AddEq => {
                 return Err(Error {
                     kind: Kind::Parser,
                     span,

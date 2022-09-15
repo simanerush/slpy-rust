@@ -30,6 +30,7 @@ pub enum Op {
     Mod,
     Eq,
     Expt,
+    AddEq,
 }
 
 #[derive(Default, PartialEq, Eq, Debug)]
@@ -80,6 +81,7 @@ impl TokenStream {
 
     /// Eat a token of `TokenKind`.
     pub fn eat(&mut self, target: &TokenKind) {
+        // TODO: have better error handling here
         assert!(&self.current().map_or(false, |i| &i.kind == target));
         self.advance();
     }
@@ -226,7 +228,7 @@ impl<'a> Tokenizer<'a> {
                 '(' => self.single_char(LParen),
                 ')' => self.single_char(RParen),
                 ',' => self.single_char(Comma),
-                '+' => self.single_char(Op(Plus)),
+                '+' => self.next_or('=', Op(AddEq), Op(Plus))?,
                 '-' => self.single_char(Op(Minus)),
                 '*' => self.next_or('*', Op(Expt), Op(Times))?,
                 '/' => self.expect_next(Op(Div), '/')?,
@@ -335,6 +337,7 @@ mod tests {
         ntt!(div: "//" => Op(Div));
         ntt!(modulus: "%" => Op(Mod));
         ntt!(eq: "=" => Op(Eq));
+        ntt!(add_eq: "+=" => Op(AddEq));
         ntt!(comment: "#\nx" => Ident("x".to_string()));
         ntt!(num: "1234" => Number(1234));
         ntt!(ident: "abcd" => Ident("abcd".to_string()));
