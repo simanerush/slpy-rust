@@ -33,7 +33,7 @@ you should see the AST printed out.
 
 ### 2.4 `print` with multiple arguments
 
-![Multiple-argument print](images/expt.png)
+![Multiple-argument print](images/print.png)
 
 ### 2.5 `+=` statement
 
