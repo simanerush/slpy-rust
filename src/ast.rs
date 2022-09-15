@@ -3,6 +3,7 @@
 //! TODO: error handling
 
 use std::collections::{HashMap, VecDeque};
+use std::io::Write;
 
 use crate::error::{Error, Kind, Result};
 use crate::tokenizer::{Op, Token, TokenKind, TokenStream};
@@ -63,7 +64,7 @@ impl Ast for Blck {
         let mut stmts = VecDeque::new();
         while tokens.current().is_some() {
             stmts.push_back(Stmt::parse(tokens)?);
-            tokens.eat(&TokenKind::NewLine);
+            tokens.eat(&TokenKind::NewLine)?;
         }
 
         Ok(Self { stmts })
@@ -95,13 +96,13 @@ pub struct Stmt {
 
 impl Stmt {
     fn parse_asgn(tokens: &mut TokenStream) -> Result<Self> {
-        let start = tokens.current().unwrap().span.start;
+        let start = tokens.current_or()?.span.start;
         let name = match tokens.take().kind {
             TokenKind::Ident(ident) => ident,
             _ => {
                 return Err(Error {
                     kind: Kind::Parser,
-                    span: tokens.current().unwrap().span,
+                    span: tokens.current_or()?.span,
                 });
             }
         };
@@ -118,14 +119,14 @@ impl Stmt {
                     span,
                 })),
                 right: Box::new(constant),
-                op: BinOp::Plus
+                op: BinOp::Plus,
             }
         } else {
-            tokens.eat(&TokenKind::Op(Op::Eq));
+            tokens.eat(&TokenKind::Op(Op::Asgn))?;
 
             Expn::parse(tokens)?
         };
-            
+
         Ok(Self {
             span: Span {
                 start,
@@ -133,23 +134,22 @@ impl Stmt {
             },
             data: StmtData::Asgn(name, expn),
         })
-
     }
 
     fn parse_prnt(tokens: &mut TokenStream) -> Result<Self> {
-        let start = tokens.current().unwrap().span.start;
-        tokens.eat(&TokenKind::Ident("print".to_string()));
-        tokens.eat(&TokenKind::LParen);
+        let start = tokens.current_or()?.span.start;
+        tokens.eat(&TokenKind::Ident("print".to_string()))?;
+        tokens.eat(&TokenKind::LParen)?;
         let mut expns = vec![Expn::parse(tokens)?];
         while tokens
             .current()
             .map_or(false, |t| t.kind == TokenKind::Comma)
         {
-            tokens.eat(&TokenKind::Comma);
+            tokens.eat(&TokenKind::Comma)?;
             expns.push(Expn::parse(tokens)?);
         }
-        let end = tokens.current().unwrap().span.end;
-        tokens.eat(&TokenKind::RParen);
+        let end = tokens.current_or()?.span.end;
+        tokens.eat(&TokenKind::RParen)?;
         Ok(Self {
             span: Span { start, end },
             data: StmtData::Prnt(expns),
@@ -257,7 +257,7 @@ impl Expn {
             TokenKind::LParen => {
                 tokens.advance();
                 let lhs = Self::parse_impl(tokens, 0)?;
-                tokens.eat(&TokenKind::RParen);
+                tokens.eat(&TokenKind::RParen)?;
                 lhs
             }
             TokenKind::Ident(_) | TokenKind::Number(_) => Self::Leaf(Leaf::parse(tokens)?),
@@ -272,11 +272,7 @@ impl Expn {
         while let Some(tkn) = tokens.current() {
             let span = tkn.span;
             let op = match tkn.kind {
-                TokenKind::NewLine => {
-                    tokens.advance();
-                    break;
-                }
-                TokenKind::RParen => {
+                TokenKind::NewLine | TokenKind::RParen | TokenKind::Comma => {
                     break;
                 }
                 TokenKind::Op(op) => BinOp::from_token(op, span)?,
@@ -365,7 +361,7 @@ impl BinOp {
             Op::Div => Self::Div,
             Op::Mod => Self::Mod,
             Op::Expt => Self::Expt,
-            Op::Eq | Op::AddEq => {
+            Op::Asgn | Op::AddEq => {
                 return Err(Error {
                     kind: Kind::Parser,
                     span,
@@ -414,11 +410,9 @@ pub struct Leaf {
 }
 
 impl Leaf {
-    fn parse_inpt(tokens: &mut TokenStream) -> Result<Self> {
+    fn parse_inpt(tokens: &mut TokenStream, start: Loc) -> Result<Self> {
         // todo: fix
-        let start = tokens.current().unwrap().span.start;
-        tokens.eat(&TokenKind::Ident("input".to_string()));
-        tokens.eat(&TokenKind::LParen);
+        tokens.eat(&TokenKind::LParen)?;
         let tkn = tokens.current_or()?;
         let prompt = if let TokenKind::Str(s) = &tkn.kind {
             s.to_string()
@@ -428,9 +422,9 @@ impl Leaf {
                 kind: Kind::Parser,
             });
         };
-        let end = tokens.current().unwrap().span.end;
         tokens.advance();
-        tokens.eat(&TokenKind::RParen);
+        let end = tokens.current_or()?.span.end;
+        tokens.eat(&TokenKind::RParen)?;
         Ok(Self {
             span: Span { start, end },
             data: LeafData::Inpt(prompt),
@@ -449,7 +443,7 @@ impl Ast for Leaf {
         let tkn = tokens.take();
         let span = tkn.span;
         Ok(match tkn.kind {
-            TokenKind::Ident(s) if s == "input" => Self::parse_inpt(tokens)?,
+            TokenKind::Ident(s) if s == "input" => Self::parse_inpt(tokens, span.start)?,
             TokenKind::Ident(s) => Self {
                 data: LeafData::Name(s),
                 span,
@@ -474,9 +468,10 @@ impl Ast for Leaf {
             LeafData::Nmbr(n) => n as SlpyObject,
             LeafData::Inpt(s) => {
                 print!("{}", s);
+                std::io::stdout().flush().expect("can flush stdout");
                 let mut buffer = String::new();
                 if std::io::stdin().read_line(&mut buffer).is_ok() {
-                    if let Ok(n) = buffer.parse() {
+                    if let Ok(n) = buffer.trim_end().parse() {
                         return Ok(n);
                     }
                 }
@@ -691,6 +686,23 @@ mod tests {
                             op: BinOp::Times,
                             right: num!(1,5 => 4),
                         })
+                    }
+                );
+            }
+
+            #[test]
+            fn input() {
+                let mut tokens = Tokenizer::lex("input(\"hi\")").unwrap();
+                let leaf = Leaf::parse(&mut tokens).unwrap();
+
+                assert_eq!(
+                    leaf,
+                    Leaf {
+                        data: LeafData::Inpt("hi".to_string()),
+                        span: Span {
+                            start: Loc { row: 1, col: 1 },
+                            end: Loc { row: 1, col: 11 }
+                        }
                     }
                 );
             }

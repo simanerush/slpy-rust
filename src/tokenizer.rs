@@ -1,5 +1,7 @@
 //! The lexer.
 
+use std::fmt::Display;
+
 use crate::error::{Error, Kind, Result};
 use crate::{Loc, Span};
 
@@ -9,7 +11,7 @@ pub struct Token {
     pub span: Span,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum TokenKind {
     NewLine,
     Comma,
@@ -21,6 +23,21 @@ pub enum TokenKind {
     Op(Op),
 }
 
+impl Display for TokenKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NewLine => write!(f, "newline"),
+            Self::Comma => write!(f, "`,`"),
+            Self::Ident(s) => write!(f, "identifier `{}`", s),
+            Self::Number(n) => write!(f, "numeric literal `{}`", n),
+            Self::Str(s) => write!(f, "string literal \"{}\"", s),
+            Self::LParen => write!(f, "`(`"),
+            Self::RParen => write!(f, "`)`"),
+            Self::Op(o) => write!(f, "`{}`", o),
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub enum Op {
     Plus,
@@ -28,9 +45,25 @@ pub enum Op {
     Times,
     Div,
     Mod,
-    Eq,
+    Asgn,
     Expt,
     AddEq,
+}
+
+impl Display for Op {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::Plus => "+",
+            Self::Minus => "-",
+            Self::Times => "*",
+            Self::Div => "//",
+            Self::Mod => "%",
+            Self::Asgn => "=",
+            Self::Expt => "**",
+            Self::AddEq => "+=",
+        };
+        write!(f, "{}", message)
+    }
 }
 
 #[derive(Default, PartialEq, Eq, Debug)]
@@ -80,10 +113,20 @@ impl TokenStream {
     }
 
     /// Eat a token of `TokenKind`.
-    pub fn eat(&mut self, target: &TokenKind) {
-        // TODO: have better error handling here
-        assert!(&self.current().map_or(false, |i| &i.kind == target));
-        self.advance();
+    pub fn eat(&mut self, target: &TokenKind) -> Result<()> {
+        let tkn = self.current_or()?;
+        if &tkn.kind == target {
+            self.advance();
+            Ok(())
+        } else {
+            Err(Error {
+                span: tkn.span,
+                kind: Kind::WrongChar {
+                    expected: target.clone(),
+                    got: tkn.kind.clone(),
+                },
+            })
+        }
     }
 
     /// Take the current token from the tokenizer.
@@ -233,7 +276,7 @@ impl<'a> Tokenizer<'a> {
                 '*' => self.next_or('*', Op(Expt), Op(Times))?,
                 '/' => self.expect_next(Op(Div), '/')?,
                 '%' => self.single_char(Op(Mod)),
-                '=' => self.single_char(Op(Eq)),
+                '=' => self.single_char(Op(Asgn)),
                 '#' => {
                     self.loc.row += 1;
                     self.loc.col = 1;
@@ -336,7 +379,7 @@ mod tests {
         ntt!(times: "*" => Op(Times));
         ntt!(div: "//" => Op(Div));
         ntt!(modulus: "%" => Op(Mod));
-        ntt!(eq: "=" => Op(Eq));
+        ntt!(eq: "=" => Op(Asgn));
         ntt!(add_eq: "+=" => Op(AddEq));
         ntt!(comment: "#\nx" => Ident("x".to_string()));
         ntt!(num: "1234" => Number(1234));
@@ -413,9 +456,19 @@ mod tests {
             tok!(1,8 => NewLine)
         }
 
+        lt! {mult_print: "print(x, y)" =>
+            tok!(1,1;1,5 => Ident("print".to_string())),
+            tok!(1,6 => LParen),
+            tok!(1,7 => Ident("x".to_string())),
+            tok!(1,8 => Comma),
+            tok!(1,10 => Ident("y".to_string())),
+            tok!(1,11 => RParen),
+            tok!(1,12 => NewLine)
+        }
+
         lt! {two_lines: "x = input(\"Enter a number.\")\nprint(x)" =>
             tok!(1,1 => Ident("x".to_string())),
-            tok!(1,3 => Op(Eq)),
+            tok!(1,3 => Op(Asgn)),
             tok!(1,5;1,9 => Ident("input".to_string())),
             tok!(1,10 => LParen),
             tok!(1,11;1,27 => Str("Enter a number.".to_string())),

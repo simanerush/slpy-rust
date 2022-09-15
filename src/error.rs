@@ -1,4 +1,5 @@
 // TODO: error
+use crate::tokenizer::TokenKind;
 use crate::Span;
 
 use thiserror::Error;
@@ -25,4 +26,7 @@ pub enum Kind {
 
     #[error("interpretation failed")]
     Interpretation,
+
+    #[error("expected {expected}, but saw {got}")]
+    WrongChar { expected: TokenKind, got: TokenKind },
 }

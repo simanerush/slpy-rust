@@ -43,3 +43,13 @@ pub fn dump(source: String) -> Result<()> {
     Ok(())
 }
 
+/// Run the source file.
+///
+/// # Errors
+/// If parsing or evaluation fails.
+pub fn run(source: String) -> Result<()> {
+    let contents = fs::read_to_string(source).expect("Should have been able to read the file");
+    let mut tokens = Tokenizer::lex(contents.as_str())?;
+    let parsed = Prgm::parse(&mut tokens)?;
+    parsed.eval(&mut ast::Context::default())
+}
